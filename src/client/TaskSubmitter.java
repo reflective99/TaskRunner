@@ -1,10 +1,14 @@
 package client;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
+
+import task.ITask;
 import task.TaskRunner;
 import util.tasks.FileCheckerTask;
 import util.tasks.PortAvailableTask;
@@ -16,110 +20,103 @@ import util.tasks.PortAvailableTask;
  */
 public class TaskSubmitter {
 
-	/**
-	 * Creates two tasks and submits them to the TaskRunner.
-	 * @param args
-	 * @throws Exception
-	 */
-	
-	private String fileName;
-	private Integer availPort;
-	private int tast1TTL;
-	private int task2TTL;
-	private int task1Iterations;
-	private int tast2Iterations;
-	private static ExecutorService EXECUTOR;
-	
-	public Integer getPort(){
-		return this.availPort;
-	}
-	
-	public String getFileName() {
-		return this.fileName;
-	}
-	
-	private void startSubmission() throws InterruptedException, ExecutionException {
-		
-		int numThreads = 2;
-		EXECUTOR = Executors.newFixedThreadPool(numThreads);
-		TaskRunner taskRunner = new TaskRunner();
+  /**
+   * Creates two tasks and submits them to the TaskRunner.
+   * @param args
+   * @throws Exception
+   */
 
-		FutureTask<Object> futureTask1 = new FutureTask<Object>(new Callable<Object>(){
-			@Override
-			public Object call() throws Exception {
-				return taskRunner.runTaskAsync(new FileCheckerTask<Object>(fileName), getTask1Iterations(), getTast1TTL()).get();
-			}
+  /** Number of Tasks */
+  private static int numTasks;
 
-		});
+  /** A Map of Tasks To be Run and their FutureTask Objects */
+  private static Map<ITask<Object>, FutureTask<Object>> myTasks =
+      new HashMap<ITask<Object>, FutureTask<Object>>();
 
-		FutureTask<Object> futureTask2 = new FutureTask<Object>(new Callable<Object>() {
-			@Override
-			public Object call() throws Exception {
-				return taskRunner.runTaskAsync(new PortAvailableTask<Object>(), getTask1Iterations(), getTask2TTL()).get();
-			}
-		});
+  /** Task Executor */
+  private static ExecutorService EXECUTOR;
 
-		EXECUTOR.execute(futureTask1);
-		EXECUTOR.execute(futureTask2);
+  public void initializeFutureTasks(TaskRunner taskRunner, int taskIterations, int taskDelay) {
 
+    for(ITask<Object> task : myTasks.keySet()){
 
-		
-		//executor.awaitTermination(10, TimeUnit.SECONDS);
-		System.out.println("Future returned: " + futureTask1.get());
-		System.out.println("Future returned: " + futureTask2.get());
-		this.availPort = (Integer) futureTask2.get();
-		this.fileName = (String) futureTask1.get();
-		System.out.println(this.availPort + " print");
-		
-	}
-	
-	public void submitTasks() throws InterruptedException, ExecutionException{
-		startSubmission();
-	}
-	
-	public void setFileName(String fileName){
-		this.fileName = fileName;
-	}
-	
-	public void shutDown() {
-		EXECUTOR.shutdown();
-	}
+      FutureTask<Object> future = new FutureTask<Object>(new Callable<Object>() {
+        @Override
+        public Object call() throws Exception {
+          return taskRunner.runTaskAsync(task, taskIterations, taskDelay).get();
+        }
+      });
 
-	public static void main(String[] args) throws Exception {    
-		TaskSubmitter ts = new TaskSubmitter();
-		ts.setFileName("src");
-		ts.submitTasks();
-	}
+      myTasks.put(task, future);
 
-	public int getTast1TTL() {
-		return tast1TTL;
-	}
+    }
+  }
 
-	public void setTast1TTL(int tast1ttl) {
-		tast1TTL = tast1ttl;
-	}
+  public void initializeExecutor() {
+    EXECUTOR = Executors.newFixedThreadPool(numTasks);
+  }
 
-	public int getTask2TTL() {
-		return task2TTL;
-	}
+  public void executeTasksViaFutureCallBacks() {
 
-	public void setTask2TTL(int task2ttl) {
-		task2TTL = task2ttl;
-	}
+    for(ITask<Object> task : myTasks.keySet()){
+      EXECUTOR.execute(myTasks.get(task));
+      try {
+        System.out.println(myTasks.get(task).get());
+      } catch (InterruptedException | ExecutionException e) {
+        e.printStackTrace();
+      }
+    }
 
-	public int getTask1Iterations() {
-		return task1Iterations;
-	}
+  }
 
-	public void setTask1Iterations(int task1Iterations) {
-		this.task1Iterations = task1Iterations;
-	}
+  public void executorShutDown(){
+    EXECUTOR.shutdown();
+    while(!EXECUTOR.isTerminated()){
 
-	public int getTast2Iterations() {
-		return tast2Iterations;
-	}
+    }
+    System.out.println("All Tasks are finished!");
+  }
 
-	public void setTast2Iterations(int tast2Iterations) {
-		this.tast2Iterations = tast2Iterations;
-	}
+  public void setNumberOfTasks(int num){
+    numTasks = num;
+  }
+
+  public void addFutureTask(ITask<Object> task){
+    myTasks.put(task, null);
+  }
+
+  public FutureTask<Object> getFutureForTask(ITask<Object> task) {
+    return myTasks.get(task);
+  }
+
+  public static void main(String[] args) throws Exception {    
+
+    TaskSubmitter taskSubmitter = new TaskSubmitter();
+
+    numTasks = 2;
+
+    String fileName = "xyz";
+    /** Number of times we want to check for task completion */
+    int taskIterations = 10;
+    /** Delay time in MilliSeconds */
+    int taskDelay = 1000;
+
+    FileCheckerTask<Object> fileChecker = new FileCheckerTask<Object>(fileName);
+    PortAvailableTask<Object> portChecker = new PortAvailableTask<Object>();
+
+    taskSubmitter.addFutureTask(fileChecker);
+    taskSubmitter.addFutureTask(portChecker);
+
+    TaskRunner taskRunner = new TaskRunner();
+
+    taskSubmitter.initializeFutureTasks(taskRunner, taskIterations, taskDelay);
+
+    taskSubmitter.initializeExecutor();
+
+    taskSubmitter.executeTasksViaFutureCallBacks();
+
+    taskSubmitter.executorShutDown();
+
+  }
+
 }
